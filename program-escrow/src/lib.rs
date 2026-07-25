@@ -1757,20 +1757,6 @@ impl ProgramEscrowContract {
             let recipient = recipients.get(i).unwrap();
             let amount = amounts.get(i).unwrap();
 
-            // Check and emit large payout event
-            if amount >= threshold {
-                env.events().publish(
-                    (LARGE_PAYOUT,),
-                    LargePayoutEvent {
-                        version: EVENT_VERSION_V2,
-                        program_id: program_id.clone(),
-                        recipient: recipient.clone(),
-                        amount,
-                        threshold,
-                    },
-                );
-            }
-
             // Transfer funds from contract to recipient
             token_client.transfer(&contract_address, &recipient, &amount);
 
@@ -1798,6 +1784,24 @@ impl ProgramEscrowContract {
         // Store updated data
         env.storage().persistent().set(&PROGRAM_DATA, &program_data);
         Self::bump_persistent_symbol_ttl(&env, &PROGRAM_DATA);
+
+        // Emit large payout analytics only after every transfer and state update succeeds.
+        for i in 0..batch_len {
+            let recipient = recipients.get(i).unwrap();
+            let amount = amounts.get(i).unwrap();
+            if amount >= threshold {
+                env.events().publish(
+                    (LARGE_PAYOUT,),
+                    LargePayoutEvent {
+                        version: EVENT_VERSION_V2,
+                        program_id: program_id.clone(),
+                        recipient,
+                        amount,
+                        threshold,
+                    },
+                );
+            }
+        }
 
         // Emit BatchPayout event
         env.events().publish(
@@ -1920,9 +1924,6 @@ impl ProgramEscrowContract {
             panic!("Insufficient balance");
         }
 
-        // Check and emit large payout event
-        Self::check_and_emit_large_payout(&env, &program_data, &recipient, amount);
-
         // Transfer funds from contract to recipient
         let contract_address = env.current_contract_address();
         let token_client = token::Client::new(&env, &program_data.token_address);
@@ -1950,6 +1951,9 @@ impl ProgramEscrowContract {
         // Store updated data
         env.storage().persistent().set(&PROGRAM_DATA, &updated_data);
         Self::bump_persistent_symbol_ttl(&env, &PROGRAM_DATA);
+
+        // Emit large payout analytics only after transfer and state update succeed.
+        Self::check_and_emit_large_payout(&env, &updated_data, &recipient, amount);
 
         // Emit Payout event
         env.events().publish(
